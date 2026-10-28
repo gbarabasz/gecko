@@ -17,8 +17,8 @@ development Artifact Registry repository, tagged with the PR's head commit SHA
 (full and 7-character short):
 
 ```
-us-central1-docker.pkg.dev/gcp-hcp-commons-dev/gcp-hcp-pr-images/gecko-controllers:<sha>
-us-central1-docker.pkg.dev/gcp-hcp-commons-dev/gcp-hcp-pr-images/gecko-platform-api-server:<sha>
+northamerica-northeast2-docker.pkg.dev/gcp-hcp-commons-dev/gcp-hcp-pr-images/gecko-controllers:<sha>
+northamerica-northeast2-docker.pkg.dev/gcp-hcp-commons-dev/gcp-hcp-pr-images/gecko-platform-api-server:<sha>
 ```
 
 The optional `<component>-publish-pr-images` check on the PR turns green once

@@ -8,7 +8,7 @@ require (
 	github.com/go-logr/stdr v1.2.2
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
-	github.com/open-feature/go-sdk v1.19.0
+	github.com/open-feature/go-sdk v1.20.0
 	github.com/open-feature/go-sdk-contrib/providers/flagd v0.8.0
 	github.com/openshift-online/gecko/orlop v0.0.0-00010101000000-000000000000
 	golang.org/x/text v0.43.0

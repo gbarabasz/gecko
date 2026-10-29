@@ -12,6 +12,8 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/openshift-online/gecko/controllers/client/transport"
 	"github.com/openshift-online/gecko/controllers/util/logger"
@@ -110,7 +112,7 @@ func (c *Client) clients(ctx context.Context, mcName string) (*mcClients, error)
 // Apply decomposes the manifests into individual resources and writes one
 // ApplyDesire + one ReadDesire document per resource to the specs DB.
 // Returns the current status by calling GetStatus after writing.
-func (c *Client) Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte) (*transport.Status, error) {
+func (c *Client) Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte, opts ...transport.ApplyOptions) (*transport.Status, error) {
 	mc, err := c.clients(ctx, targetCluster)
 	if err != nil {
 		return nil, err
@@ -139,16 +141,23 @@ func (c *Client) Apply(ctx context.Context, targetCluster, groupKey string, mani
 			return nil, fmt.Errorf("firestore transport: Apply %s/%s build apply desire: %w", targetCluster, groupKey, err)
 		}
 		applyRef := mc.specs.Collection(collectionApplyDesires).Doc(applyID)
-		job, err := batch.Set(applyRef, applyData)
-		if err != nil {
-			return nil, fmt.Errorf("firestore transport: Apply %s/%s set apply desire: %w", targetCluster, groupKey, err)
+		paths := transport.CreateOnlyPaths(resourceKey(ref), opts)
+		if len(paths) > 0 {
+			if err := setCreateOnlyDesire(ctx, mc.specs, applyRef, applyData, paths); err != nil {
+				return nil, fmt.Errorf("firestore transport: Apply %s/%s set creation-only desire: %w", targetCluster, groupKey, err)
+			}
+		} else {
+			job, err := batch.Set(applyRef, applyData)
+			if err != nil {
+				return nil, fmt.Errorf("firestore transport: Apply %s/%s set apply desire: %w", targetCluster, groupKey, err)
+			}
+			jobs = append(jobs, job)
 		}
-		jobs = append(jobs, job)
 
 		// Write ReadDesire
 		readID, readData := buildReadDesireDoc(groupKey, targetCluster, ref)
 		readRef := mc.specs.Collection(collectionReadDesires).Doc(readID)
-		job, err = batch.Set(readRef, readData)
+		job, err := batch.Set(readRef, readData)
 		if err != nil {
 			return nil, fmt.Errorf("firestore transport: Apply %s/%s set read desire: %w", targetCluster, groupKey, err)
 		}
@@ -490,4 +499,37 @@ func (c *Client) Close() {
 		mc.status.Close()
 	}
 	c.cache = make(map[string]*mcClients)
+}
+
+// setCreateOnlyDesire freezes immutable fields in the first persisted apply
+// desire, not a process-local cache or eventually consistent status feedback.
+func setCreateOnlyDesire(ctx context.Context, c *firestore.Client, ref *firestore.DocumentRef, data map[string]any, paths [][]string) error {
+	return c.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(ref)
+		if status.Code(err) == codes.NotFound {
+			return tx.Set(ref, data)
+		}
+		if err != nil {
+			return err
+		}
+		original, ok := snap.Data()["spec_kubeContent"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("existing apply desire %s has no resource content", ref.ID)
+		}
+		// Use a fresh copy on every transaction retry.
+		desired, ok := data["spec_kubeContent"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("apply desire %s has no resource content", ref.ID)
+		}
+		desired = k8sruntime.DeepCopyJSON(desired)
+		if err := transport.PreserveCreateOnlyFields(desired, original, paths); err != nil {
+			return err
+		}
+		updated := make(map[string]any, len(data))
+		for key, value := range data {
+			updated[key] = value
+		}
+		updated["spec_kubeContent"] = desired
+		return tx.Set(ref, updated)
+	})
 }

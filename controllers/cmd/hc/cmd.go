@@ -8,6 +8,7 @@ import (
 
 	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
 	hc "github.com/openshift-online/gecko/controllers/hc"
+	"github.com/openshift-online/gecko/controllers/hc/manifest"
 	"github.com/openshift-online/gecko/controllers/util/setup"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
@@ -24,6 +25,7 @@ import (
 func NewCommand(rf *setup.RootFlags) *cobra.Command {
 	var (
 		customerLabelsFile  string
+		resourceTagsFile    string
 		pullSecretStoreName string
 		pullSecretGCPKey    string
 	)
@@ -47,6 +49,14 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 				}
 			}
 
+			var resourceTags []manifest.ResourceTag
+			if resourceTagsFile != "" {
+				resourceTags, err = hc.LoadResourceTags(resourceTagsFile)
+				if err != nil {
+					return fmt.Errorf("load resource tags: %w", err)
+				}
+			}
+
 			t := fstransport.New(log)
 			defer t.Close()
 
@@ -59,7 +69,7 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 				return fmt.Errorf("index nodepools by cluster ID: %w", err)
 			}
 
-			rec := hc.New(t, log, mgr.GetClient(), customerLabels, pullSecretStoreName, pullSecretGCPKey)
+			rec := hc.New(t, log, mgr.GetClient(), customerLabels, resourceTags, pullSecretStoreName, pullSecretGCPKey)
 
 			if err := ctrl.NewControllerManagedBy(mgr).
 				For(&privatev1.Cluster{}).
@@ -74,6 +84,7 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&resourceTagsFile, "resource-tags-file", "", "Path to JSON list of creation-only GCP Resource Manager tags (omit to disable)")
 	cmd.Flags().StringVar(&customerLabelsFile, "customer-labels-file", "", "Path to JSON file containing customer-facing GCP resource labels (omit to disable)")
 	cmd.Flags().StringVar(&pullSecretStoreName, "pull-secret-store-name", "gcp-secret-manager", "External Secrets ClusterSecretStore name for HostedCluster pull secret")
 	cmd.Flags().StringVar(&pullSecretGCPKey, "pull-secret-gcp-key", "default-openshift-pull-secret", "GCP Secret Manager key used for HostedCluster pull secret")

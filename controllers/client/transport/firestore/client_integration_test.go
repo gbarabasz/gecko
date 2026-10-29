@@ -1301,3 +1301,67 @@ func TestIntegration_GetStatus_UsesSpecUpdateTimeForStaleness(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, status.Stale, "status observing the current spec should not be stale")
 }
+
+func TestIntegration_Apply_CreateOnlyFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial string
+		legacy        bool
+	}{
+		{name: "configured", initial: `[{"key":"redhat-managed","value":"true","parentID":"123456789"}]`},
+		{name: "initially empty"},
+		{name: "existing untagged desire", legacy: true},
+		{name: "existing tagged desire", legacy: true, initial: `[{"key":"old","value":"value"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			opts := emulatorOpts(t)
+			project := uniqueIntegrationProject("tags")
+			specs, err := firestore.NewClientWithDatabase(ctx, project, "specs", opts...)
+			require.NoError(t, err)
+			closeFirestoreClient(t, specs)
+			cleanupCollections(t, []*firestore.Client{specs}, "applydesires", "readdesires")
+			makeManifest := func(tags, release string) []byte {
+				obj := map[string]any{"apiVersion": "hypershift.openshift.io/v1beta1", "kind": "HostedCluster", "metadata": map[string]any{"name": "hc", "namespace": "clusters-test"}, "spec": map[string]any{"release": map[string]any{"image": release}, "platform": map[string]any{"gcp": map[string]any{}}}}
+				if tags != "" {
+					var value []any
+					require.NoError(t, json.Unmarshal([]byte(tags), &value))
+					obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)["resourceTags"] = value
+				}
+				raw, err := json.Marshal(obj)
+				require.NoError(t, err)
+				return raw
+			}
+			createOnly := transport.ApplyOptions{CreateOnlyFields: map[string][][]string{transport.ResourceKey("hypershift.openshift.io", "v1beta1", "hostedclusters", "clusters-test", "hc"): {{"spec", "platform", "gcp", "resourceTags"}}}}
+			c := newTestClient(t)
+			var initialOpts []transport.ApplyOptions
+			if !tc.legacy {
+				initialOpts = append(initialOpts, createOnly)
+			}
+			_, err = c.Apply(ctx, project, testGroupKey, [][]byte{makeManifest(tc.initial, "old-release")}, initialOpts...)
+			require.NoError(t, err)
+			c.Close()
+			// Recreate the transport: persistence, not process memory, must freeze tags.
+			c = newTestClient(t)
+			defer c.Close()
+			for _, tags := range []string{`[{"key":"changed","value":"tag"}]`, ""} {
+				_, err = c.Apply(ctx, project, testGroupKey, [][]byte{makeManifest(tags, "new-release")}, createOnly)
+				require.NoError(t, err)
+				snaps, err := specs.Collection("applydesires").Documents(ctx).GetAll()
+				require.NoError(t, err)
+				require.Len(t, snaps, 1)
+				content := snaps[0].Data()["spec_kubeContent"].(map[string]any)
+				spec := content["spec"].(map[string]any)
+				require.Equal(t, "new-release", spec["release"].(map[string]any)["image"])
+				gcp := spec["platform"].(map[string]any)["gcp"].(map[string]any)
+				if tc.initial == "" {
+					require.NotContains(t, gcp, "resourceTags")
+				} else {
+					raw, err := json.Marshal(gcp["resourceTags"])
+					require.NoError(t, err)
+					require.JSONEq(t, tc.initial, string(raw))
+				}
+			}
+		})
+	}
+}

@@ -42,7 +42,7 @@ type DeleteStatus struct {
 // Client abstracts the transport layer for delivering resources to management clusters.
 type Client interface {
 	// Apply creates or updates resources on the target cluster and returns current status.
-	Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte) (*Status, error)
+	Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte, opts ...ApplyOptions) (*Status, error)
 	// GetStatus compares the expected Desire documents in the specs database
 	// with the statuses currently available for the given groupKey.
 	GetStatus(ctx context.Context, targetCluster, groupKey string) (*Status, error)

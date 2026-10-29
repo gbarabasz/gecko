@@ -362,3 +362,37 @@ func TestBuild_PullSecretStoreName(t *testing.T) {
 		require.Equal(t, "gcp-secret-manager", storeRef["name"])
 	})
 }
+
+func TestBuild_ResourceTags(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tags []manifest.ResourceTag
+		want string
+	}{
+		{name: "absent"},
+		{name: "empty", tags: []manifest.ResourceTag{}},
+		{name: "configured", tags: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}, {Key: "env", Value: "prod", ParentID: "123456789"}}, want: `[{"key":"redhat-managed","value":"true"},{"key":"env","value":"prod","parentID":"123456789"}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := testInput()
+			input.ResourceTags = tc.tags
+			input.ResourceLabels = map[string]string{"partner": "openshift"}
+			manifests, err := manifest.Build(input)
+			require.NoError(t, err)
+			var obj map[string]any
+			require.NoError(t, json.Unmarshal(manifests[3], &obj))
+			gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
+			if tc.want == "" {
+				require.NotContains(t, gcp, "resourceTags")
+			} else {
+				raw, err := json.Marshal(gcp["resourceTags"])
+				require.NoError(t, err)
+				require.JSONEq(t, tc.want, string(raw))
+			}
+			require.Contains(t, gcp, "resourceLabels")
+			again, err := manifest.Build(input)
+			require.NoError(t, err)
+			require.Equal(t, manifests, again)
+		})
+	}
+}

@@ -38,17 +38,19 @@ type Reconciler struct {
 	log                 logger.Logger
 	client              client.Client
 	customerLabels      map[string]string
+	resourceTags        []manifest.ResourceTag
 	pullSecretStoreName string
 	pullSecretGCPKey    string
 }
 
 // New creates a new Reconciler.
-func New(transport transport.Client, log logger.Logger, c client.Client, customerLabels map[string]string, pullSecretStoreName, pullSecretGCPKey string) *Reconciler {
+func New(transport transport.Client, log logger.Logger, c client.Client, customerLabels map[string]string, resourceTags []manifest.ResourceTag, pullSecretStoreName, pullSecretGCPKey string) *Reconciler {
 	return &Reconciler{
 		transport:           transport,
 		log:                 log,
 		client:              c,
 		customerLabels:      customerLabels,
+		resourceTags:        resourceTags,
 		pullSecretStoreName: pullSecretStoreName,
 		pullSecretGCPKey:    pullSecretGCPKey,
 	}
@@ -154,6 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		PullSecretStoreName:  r.pullSecretStoreName,
 		PullSecretGCPKey:     r.pullSecretGCPKey,
 		ResourceLabels:       r.customerLabels,
+		ResourceTags:         r.resourceTags,
 	}
 
 	manifests, err := manifest.Build(mwInput)
@@ -161,7 +164,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, fmt.Errorf("%s: build manifests: %w", adapterName, err)
 	}
 
-	mwStatus, err := r.transport.Apply(ctx, placement.ManagementClusterName, groupKey, manifests)
+	mwStatus, err := r.transport.Apply(ctx, placement.ManagementClusterName, groupKey, manifests, transport.ApplyOptions{
+		CreateOnlyFields: map[string][][]string{
+			transport.ResourceKey("hypershift.openshift.io", "v1beta1", "hostedclusters", "clusters-"+string(cluster.UID), safeName): {
+				{"spec", "platform", "gcp", "resourceTags"},
+			},
+		},
+	})
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("%s: apply resources: %w", adapterName, err)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/openshift-online/gecko/controllers/client/transport"
 	"github.com/openshift-online/gecko/controllers/client/transport/mock"
 	"github.com/openshift-online/gecko/controllers/hc"
+	"github.com/openshift-online/gecko/controllers/hc/manifest"
 	"github.com/openshift-online/gecko/controllers/util/constants"
 	"github.com/openshift-online/gecko/controllers/util/logger"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
@@ -157,7 +158,7 @@ type errTransport struct {
 	cleanupDeleteErr error
 }
 
-func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte) (*transport.Status, error) {
+func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte, _ ...transport.ApplyOptions) (*transport.Status, error) {
 	return e.applyResult, e.applyErr
 }
 func (e *errTransport) GetStatus(_ context.Context, _, _ string) (*transport.Status, error) {
@@ -263,7 +264,7 @@ func buildReconciler(
 	for _, o := range opts {
 		o(storeClient)
 	}
-	return hc.New(tr, testLogger(t), storeClient, nil, "", ""), storeClient
+	return hc.New(tr, testLogger(t), storeClient, nil, nil, "", ""), storeClient
 }
 
 // ---------------------------------------------------------------------------
@@ -1457,4 +1458,43 @@ func TestReconcile_Deletion_RemoveFinalizerError(t *testing.T) {
 	require.Contains(t, err.Error(), "remove finalizer")
 	require.Len(t, tr.CleanupDeleteDesiresCalls, 1, "cleanup should have been called before finalizer removal failed")
 	require.True(t, storeClient.updateCalled)
+}
+
+func TestReconcile_ResourceTagsCreationOnly(t *testing.T) {
+	for _, initial := range [][]manifest.ResourceTag{nil, {{Key: "redhat-managed", Value: "true", ParentID: "123456789"}}} {
+		t.Run(fmt.Sprintf("initial=%v", initial), func(t *testing.T) {
+			cluster := buildReadyCluster("cluster-1", "4.15.0")
+			tr := mock.New()
+			_, store := buildReconciler(t, cluster, nil, tr, nil)
+			reconcileWith := func(tags []manifest.ResourceTag) {
+				r := hc.New(tr, testLogger(t), store, map[string]string{"partner": "openshift"}, tags, "", "")
+				_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
+				require.NoError(t, err)
+			}
+			reconcileWith(initial)
+			require.Len(t, tr.ApplyCalls, 1)
+			first := tr.ApplyCalls[0].Manifests[3]
+			// Simulate rollout with a new configuration and a mutable release update.
+			cluster.Status.VersionResolution.ReleaseImage = "quay.io/example/new-release:latest"
+			reconcileWith([]manifest.ResourceTag{{Key: "different", Value: "tag"}})
+			reconcileWith(nil)
+			require.Len(t, tr.ApplyCalls, 3)
+			for _, call := range tr.ApplyCalls {
+				var obj map[string]any
+				require.NoError(t, json.Unmarshal(call.Manifests[3], &obj))
+				gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
+				if len(initial) == 0 {
+					require.NotContains(t, gcp, "resourceTags")
+				} else {
+					raw, err := json.Marshal(gcp["resourceTags"])
+					require.NoError(t, err)
+					want, err := json.Marshal(initial)
+					require.NoError(t, err)
+					require.JSONEq(t, string(want), string(raw))
+				}
+				require.Contains(t, gcp, "resourceLabels")
+			}
+			require.NotEqual(t, string(first), string(tr.ApplyCalls[1].Manifests[3]), "mutable fields must still update")
+		})
+	}
 }

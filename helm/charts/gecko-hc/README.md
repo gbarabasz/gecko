@@ -72,4 +72,11 @@ supported mechanism to retrofit or change tags on existing HostedClusters.
 The per-cluster resource-label propagation gap is separate: this change does not
 alter the existing config-only behavior of `customerLabels`.
 
-Run rendering coverage with `go test ./cmd/hc` from `controllers/` (requires Helm).
+Validate the deployment chart separately from the application tests:
+
+```sh
+helm lint helm/charts/gecko-hc --set image.tag=test
+helm template test helm/charts/gecko-hc --set image.tag=test
+```
+
+Supply a values file with `-f` to inspect deployments with labels and/or tags.

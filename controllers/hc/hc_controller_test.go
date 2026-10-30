@@ -12,7 +12,6 @@ import (
 	"github.com/openshift-online/gecko/controllers/client/transport"
 	"github.com/openshift-online/gecko/controllers/client/transport/mock"
 	"github.com/openshift-online/gecko/controllers/hc"
-	"github.com/openshift-online/gecko/controllers/hc/manifest"
 	"github.com/openshift-online/gecko/controllers/util/constants"
 	"github.com/openshift-online/gecko/controllers/util/logger"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
@@ -1465,13 +1464,13 @@ func TestReconcile_ResourceTags(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		requested        []privatev1.GCPResourceTag
-		configured, want []manifest.ResourceTag
+		configured, want []privatev1.GCPResourceTag
 	}{
 		{name: "none"},
-		{name: "request only", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod", ParentID: ptr.To("123456789")}}, want: []manifest.ResourceTag{{Key: "env", Value: "prod", ParentID: "123456789"}}},
-		{name: "config only", configured: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}}, want: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}}},
-		{name: "merged", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod"}}, configured: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true", ParentID: "123456789"}}, want: []manifest.ResourceTag{{Key: "env", Value: "prod"}, {Key: "redhat-managed", Value: "true", ParentID: "123456789"}}},
-		{name: "config overrides entire tag", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "customer", ParentID: ptr.To("987654321")}}, configured: []manifest.ResourceTag{{Key: "env", Value: "platform", ParentID: "123456789"}}, want: []manifest.ResourceTag{{Key: "env", Value: "platform", ParentID: "123456789"}}},
+		{name: "request only", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod", ParentID: ptr.To("123456789")}}, want: []privatev1.GCPResourceTag{{Key: "env", Value: "prod", ParentID: ptr.To("123456789")}}},
+		{name: "config only", configured: []privatev1.GCPResourceTag{{Key: "redhat-managed", Value: "true"}}, want: []privatev1.GCPResourceTag{{Key: "redhat-managed", Value: "true"}}},
+		{name: "merged", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod"}}, configured: []privatev1.GCPResourceTag{{Key: "redhat-managed", Value: "true", ParentID: ptr.To("123456789")}}, want: []privatev1.GCPResourceTag{{Key: "env", Value: "prod"}, {Key: "redhat-managed", Value: "true", ParentID: ptr.To("123456789")}}},
+		{name: "config overrides entire tag", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "customer", ParentID: ptr.To("987654321")}}, configured: []privatev1.GCPResourceTag{{Key: "env", Value: "platform", ParentID: ptr.To("123456789")}}, want: []privatev1.GCPResourceTag{{Key: "env", Value: "platform", ParentID: ptr.To("123456789")}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cluster := buildReadyCluster("cluster-1", "4.15.0")
@@ -1506,7 +1505,7 @@ func TestReconcile_ResourceTagsConfigurationChangesAreNotFrozen(t *testing.T) {
 	cluster := buildReadyCluster("cluster-1", "4.15.0")
 	tr := mock.New()
 	_, store := buildReconciler(t, cluster, nil, tr, nil)
-	for _, tags := range [][]manifest.ResourceTag{{{Key: "env", Value: "prod"}}, {{Key: "env", Value: "dev"}}, nil} {
+	for _, tags := range [][]privatev1.GCPResourceTag{{{Key: "env", Value: "prod"}}, {{Key: "env", Value: "dev"}}, nil} {
 		r := hc.New(tr, testLogger(t), store, nil, tags, "", "")
 		_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
 		require.NoError(t, err)
@@ -1532,7 +1531,7 @@ func TestReconcile_TooManyMergedResourceTags(t *testing.T) {
 	}
 	tr := mock.New()
 	_, store := buildReconciler(t, cluster, nil, tr, nil)
-	r := hc.New(tr, testLogger(t), store, nil, []manifest.ResourceTag{{Key: "extra", Value: "v"}}, "", "")
+	r := hc.New(tr, testLogger(t), store, nil, []privatev1.GCPResourceTag{{Key: "extra", Value: "v"}}, "", "")
 	_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
 	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
 	require.Empty(t, tr.ApplyCalls, "invalid merged tags must not be delivered")

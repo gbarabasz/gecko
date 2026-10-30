@@ -38,13 +38,13 @@ type Reconciler struct {
 	log                 logger.Logger
 	client              client.Client
 	customerLabels      map[string]string
-	resourceTags        []manifest.ResourceTag
+	resourceTags        []privatev1.GCPResourceTag
 	pullSecretStoreName string
 	pullSecretGCPKey    string
 }
 
 // New creates a new Reconciler.
-func New(transport transport.Client, log logger.Logger, c client.Client, customerLabels map[string]string, resourceTags []manifest.ResourceTag, pullSecretStoreName, pullSecretGCPKey string) *Reconciler {
+func New(transport transport.Client, log logger.Logger, c client.Client, customerLabels map[string]string, resourceTags []privatev1.GCPResourceTag, pullSecretStoreName, pullSecretGCPKey string) *Reconciler {
 	return &Reconciler{
 		transport:           transport,
 		log:                 log,

@@ -8,7 +8,6 @@ import (
 
 	fstransport "github.com/openshift-online/gecko/controllers/client/transport/firestore"
 	hc "github.com/openshift-online/gecko/controllers/hc"
-	"github.com/openshift-online/gecko/controllers/hc/manifest"
 	"github.com/openshift-online/gecko/controllers/util/setup"
 	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
 
@@ -49,7 +48,7 @@ func NewCommand(rf *setup.RootFlags) *cobra.Command {
 				}
 			}
 
-			var resourceTags []manifest.ResourceTag
+			var resourceTags []privatev1.GCPResourceTag
 			if resourceTagsFile != "" {
 				resourceTags, err = hc.LoadResourceTags(resourceTagsFile)
 				if err != nil {

@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-online/gecko/controllers/hc/manifest"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
+	"k8s.io/utils/ptr"
 )
 
 func testInput() manifest.Input {
@@ -366,12 +369,12 @@ func TestBuild_PullSecretStoreName(t *testing.T) {
 func TestBuild_ResourceTags(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		tags []manifest.ResourceTag
+		tags []privatev1.GCPResourceTag
 		want string
 	}{
 		{name: "absent"},
-		{name: "empty", tags: []manifest.ResourceTag{}},
-		{name: "configured", tags: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}, {Key: "env", Value: "prod", ParentID: "123456789"}}, want: `[{"key":"redhat-managed","value":"true"},{"key":"env","value":"prod","parentID":"123456789"}]`},
+		{name: "empty", tags: []privatev1.GCPResourceTag{}},
+		{name: "configured", tags: []privatev1.GCPResourceTag{{Key: "redhat-managed", Value: "true"}, {Key: "env", Value: "prod", ParentID: ptr.To("123456789")}}, want: `[{"key":"redhat-managed","value":"true"},{"key":"env","value":"prod","parentID":"123456789"}]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input := testInput()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1535,4 +1536,26 @@ func TestReconcile_TooManyMergedResourceTags(t *testing.T) {
 	_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
 	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
 	require.Empty(t, tr.ApplyCalls, "invalid merged tags must not be delivered")
+}
+
+func TestReconcile_InvalidConfiguredResourceTags(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tag     privatev1.GCPResourceTag
+		wantErr string
+	}{
+		{name: "other project parent", tag: privatev1.GCPResourceTag{Key: "env", Value: "prod", ParentID: ptr.To("other-project")}, wantErr: "parentID must be an organization ID or match the cluster GCP project ID"},
+		{name: "invalid key", tag: privatev1.GCPResourceTag{Key: "bad/key", Value: "prod"}, wantErr: "resource tag key"},
+		{name: "invalid value", tag: privatev1.GCPResourceTag{Key: "env", Value: strings.Repeat("a", 64)}, wantErr: "resource tag value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cluster := buildReadyCluster("cluster-1", "4.15.0")
+			tr := mock.New()
+			_, store := buildReconciler(t, cluster, nil, tr, nil)
+			r := hc.New(tr, testLogger(t), store, nil, []privatev1.GCPResourceTag{tc.tag}, "", "")
+			_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
+			require.ErrorContains(t, err, tc.wantErr)
+			require.Empty(t, tr.ApplyCalls, "invalid merged tags must not reach Firestore")
+		})
+	}
 }

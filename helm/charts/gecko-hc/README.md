@@ -55,6 +55,14 @@ including replacing the requested parentID. The merged list is sorted by key for
 stable manifests. At most 50 distinct keys are allowed in the combined result;
 HC rejects an oversized union before submitting any manifests.
 
+Configuration loading validates tag key/value lengths and character patterns,
+uniqueness, and optional parentID syntax against the HyperShift API rules.
+Invalid configuration fails controller startup. After merging for each Cluster,
+HC also checks that a project-valued parentID matches that Cluster's GCP project;
+numeric organization IDs and omitted parentIDs remain valid. Invalid merged tags
+are rejected before manifests are written to Firestore. These checks do not
+verify tag existence or IAM permissions in GCP.
+
 The public and private API schemas make the Cluster's `resourceTags` immutable:
 after creation, PUT/PATCH cannot add, remove, or change them. Tags use the GCP
 Resource Manager short-key/value format; parentID must identify an organization

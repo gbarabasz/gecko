@@ -133,7 +133,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if gcp := cluster.Spec.Platform.GCP; gcp != nil {
 		requestedTags = gcp.ResourceTags
 	}
-	resourceTags, err := mergeResourceTags(requestedTags, r.resourceTags)
+	resourceTags, err := mergeResourceTags(requestedTags, r.resourceTags, gcpProjectID)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("%s: merge resource tags: %w", adapterName, err)
 	}

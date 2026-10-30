@@ -145,7 +145,7 @@ type errTransport struct {
 	cleanupDeleteErr error
 }
 
-func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte, _ ...transport.ApplyOptions) (*transport.Status, error) {
+func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte) (*transport.Status, error) {
 	return e.applyResult, e.applyErr
 }
 func (e *errTransport) GetStatus(_ context.Context, _, _ string) (*transport.Status, error) {

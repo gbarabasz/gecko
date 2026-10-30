@@ -12,7 +12,8 @@ resourceTags: '[{"key":"redhat-managed","value":"true"},{"key":"environment","va
 Tags use the HyperShift GCP resource-tag API: short `key`, `value`, and optional
 `parentID` (for example, an organization ID). When omitted, HyperShift uses the
 HostedCluster's GCP project as the parent. An empty list (`"[]"`, the default)
-disables resource tags. Empty configuration omits `spec.platform.gcp.resourceTags`
+disables platform-configured tags. If both API-request and configured tags are
+absent, the manifest omits `spec.platform.gcp.resourceTags`
 rather than sending an empty field. A supporting HyperShift operator/CRD, tag
 keys/values, and tag-use IAM permissions must be installed before enabling tags.
 
@@ -32,21 +33,43 @@ and rollout checksum. Separate maps would be useful for independent ownership or
 access policies, but offer no such benefit here. Separate JSON keys preserve the
 different data shapes without changing the existing label value contract.
 
-## Creation-only tags
+## API-request tags and merging
 
-Resource tags are immutable after HostedCluster creation. Gecko freezes them
-(including their absence) in the **first persisted HostedCluster apply desire**.
-Later reconciliations atomically preserve that field from the existing desire,
-while still updating mutable fields such as the release image and labels. This
-also works across controller restarts, retries, overlapping replicas, and
-configuration changes/removal. Existing managed HostedClusters retain their
-original tags; enabling tags does not retrofit untagged HostedClusters.
+Customers can pass tags in a Cluster POST request, for example this fragment
+of an otherwise complete request:
 
-The persisted apply desire is the source of this creation snapshot; do not delete
-or edit it to change tags on an existing HostedCluster. This is not an adoption
-mechanism for out-of-band HostedClusters with no Gecko apply desire. Tag changes
-require a new HostedCluster. Configuration changes apply to new creation requests
-only, not to requests already submitted but still awaiting creation.
+```yaml
+spec:
+  platform:
+    gcp:
+      resourceTags:
+        - key: environment
+          value: production
+          parentID: "123456789"
+```
+
+These tags are stored in the Gecko Cluster. On every reconciliation, HC reads
+that Cluster and merges `spec.platform.gcp.resourceTags` with tags loaded from
+the configuration file. Configured tags take precedence on duplicate short keys,
+including replacing the requested parentID. The merged list is sorted by key for
+stable manifests. At most 50 distinct keys are allowed in the combined result;
+HC rejects an oversized union before submitting any manifests.
+
+The public and private API schemas make the Cluster's `resourceTags` immutable:
+after creation, PUT/PATCH cannot add, remove, or change them. Tags use the GCP
+Resource Manager short-key/value format; parentID must identify an organization
+or the Cluster's GCP project. API omission remains valid for existing Clusters.
+
+This validation does **not** freeze the controller's configuration file. HC
+always emits the merged desired tags, with no special Firestore handling and no
+create/update distinction. Keep the configured tags stable for existing
+HostedClusters: changing/removing them or enabling tags for an existing untagged
+HostedCluster can produce an immutable-field rejection from HyperShift. Such a
+rejection fails the whole HostedCluster apply and can block unrelated updates
+until the desired tags are restored. Updating the ConfigMap is therefore not a
+supported mechanism to retrofit or change tags on existing HostedClusters.
+
+The per-cluster resource-label propagation gap is separate: this change does not
+alter the existing config-only behavior of `customerLabels`.
 
 Run rendering coverage with `go test ./cmd/hc` from `controllers/` (requires Helm).
-The Firestore creation-only integration tests require `FIRESTORE_EMULATOR_HOST`.

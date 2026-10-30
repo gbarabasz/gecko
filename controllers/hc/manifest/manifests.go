@@ -40,7 +40,7 @@ type Input struct {
 	CAPGImage                    string            // optional — set CAPG annotation if non-empty
 	Slug                         string            // default: "user" (username slug for DNS names)
 	ResourceLabels               map[string]string // optional — sets spec.platform.gcp.resourceLabels on the HostedCluster CR
-	ResourceTags                 []ResourceTag     // optional — creation-only GCP Resource Manager tags
+	ResourceTags                 []ResourceTag     // optional — merged GCP Resource Manager tags
 }
 
 // Build constructs raw JSON bytes for each manifest resource from the given input.

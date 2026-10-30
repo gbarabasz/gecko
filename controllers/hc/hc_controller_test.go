@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -158,7 +159,7 @@ type errTransport struct {
 	cleanupDeleteErr error
 }
 
-func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte, _ ...transport.ApplyOptions) (*transport.Status, error) {
+func (e *errTransport) Apply(_ context.Context, _, _ string, _ [][]byte) (*transport.Status, error) {
 	return e.applyResult, e.applyErr
 }
 func (e *errTransport) GetStatus(_ context.Context, _, _ string) (*transport.Status, error) {
@@ -1460,41 +1461,79 @@ func TestReconcile_Deletion_RemoveFinalizerError(t *testing.T) {
 	require.True(t, storeClient.updateCalled)
 }
 
-func TestReconcile_ResourceTagsCreationOnly(t *testing.T) {
-	for _, initial := range [][]manifest.ResourceTag{nil, {{Key: "redhat-managed", Value: "true", ParentID: "123456789"}}} {
-		t.Run(fmt.Sprintf("initial=%v", initial), func(t *testing.T) {
+func TestReconcile_ResourceTags(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		requested        []privatev1.GCPResourceTag
+		configured, want []manifest.ResourceTag
+	}{
+		{name: "none"},
+		{name: "request only", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod", ParentID: ptr.To("123456789")}}, want: []manifest.ResourceTag{{Key: "env", Value: "prod", ParentID: "123456789"}}},
+		{name: "config only", configured: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}}, want: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}}},
+		{name: "merged", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "prod"}}, configured: []manifest.ResourceTag{{Key: "redhat-managed", Value: "true", ParentID: "123456789"}}, want: []manifest.ResourceTag{{Key: "env", Value: "prod"}, {Key: "redhat-managed", Value: "true", ParentID: "123456789"}}},
+		{name: "config overrides entire tag", requested: []privatev1.GCPResourceTag{{Key: "env", Value: "customer", ParentID: ptr.To("987654321")}}, configured: []manifest.ResourceTag{{Key: "env", Value: "platform", ParentID: "123456789"}}, want: []manifest.ResourceTag{{Key: "env", Value: "platform", ParentID: "123456789"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			cluster := buildReadyCluster("cluster-1", "4.15.0")
+			cluster.Spec.Platform.GCP.ResourceTags = tc.requested
 			tr := mock.New()
 			_, store := buildReconciler(t, cluster, nil, tr, nil)
-			reconcileWith := func(tags []manifest.ResourceTag) {
-				r := hc.New(tr, testLogger(t), store, map[string]string{"partner": "openshift"}, tags, "", "")
-				_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
+			r := hc.New(tr, testLogger(t), store, nil, tc.configured, "", "")
+			for range 2 {
+				_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
 				require.NoError(t, err)
 			}
-			reconcileWith(initial)
-			require.Len(t, tr.ApplyCalls, 1)
-			first := tr.ApplyCalls[0].Manifests[3]
-			// Simulate rollout with a new configuration and a mutable release update.
-			cluster.Status.VersionResolution.ReleaseImage = "quay.io/example/new-release:latest"
-			reconcileWith([]manifest.ResourceTag{{Key: "different", Value: "tag"}})
-			reconcileWith(nil)
-			require.Len(t, tr.ApplyCalls, 3)
-			for _, call := range tr.ApplyCalls {
-				var obj map[string]any
-				require.NoError(t, json.Unmarshal(call.Manifests[3], &obj))
-				gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
-				if len(initial) == 0 {
-					require.NotContains(t, gcp, "resourceTags")
-				} else {
-					raw, err := json.Marshal(gcp["resourceTags"])
-					require.NoError(t, err)
-					want, err := json.Marshal(initial)
-					require.NoError(t, err)
-					require.JSONEq(t, string(want), string(raw))
-				}
-				require.Contains(t, gcp, "resourceLabels")
+			require.Len(t, tr.ApplyCalls, 2)
+			require.Equal(t, tr.ApplyCalls[0].Manifests, tr.ApplyCalls[1].Manifests, "unchanged input must reconcile idempotently")
+			var obj map[string]any
+			require.NoError(t, json.Unmarshal(tr.ApplyCalls[0].Manifests[3], &obj))
+			gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
+			if len(tc.want) == 0 {
+				require.NotContains(t, gcp, "resourceTags")
+			} else {
+				raw, err := json.Marshal(gcp["resourceTags"])
+				require.NoError(t, err)
+				want, err := json.Marshal(tc.want)
+				require.NoError(t, err)
+				require.JSONEq(t, string(want), string(raw))
 			}
-			require.NotEqual(t, string(first), string(tr.ApplyCalls[1].Manifests[3]), "mutable fields must still update")
+			require.Equal(t, tc.requested, cluster.Spec.Platform.GCP.ResourceTags, "must not mutate stored API tags")
 		})
 	}
+}
+
+func TestReconcile_ResourceTagsConfigurationChangesAreNotFrozen(t *testing.T) {
+	cluster := buildReadyCluster("cluster-1", "4.15.0")
+	tr := mock.New()
+	_, store := buildReconciler(t, cluster, nil, tr, nil)
+	for _, tags := range [][]manifest.ResourceTag{{{Key: "env", Value: "prod"}}, {{Key: "env", Value: "dev"}}, nil} {
+		r := hc.New(tr, testLogger(t), store, nil, tags, "", "")
+		_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
+		require.NoError(t, err)
+		var obj map[string]any
+		require.NoError(t, json.Unmarshal(tr.ApplyCalls[len(tr.ApplyCalls)-1].Manifests[3], &obj))
+		gcp := obj["spec"].(map[string]any)["platform"].(map[string]any)["gcp"].(map[string]any)
+		if len(tags) == 0 {
+			require.NotContains(t, gcp, "resourceTags")
+		} else {
+			raw, err := json.Marshal(gcp["resourceTags"])
+			require.NoError(t, err)
+			want, err := json.Marshal(tags)
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(raw))
+		}
+	}
+}
+
+func TestReconcile_TooManyMergedResourceTags(t *testing.T) {
+	cluster := buildReadyCluster("cluster-1", "4.15.0")
+	for i := range 50 {
+		cluster.Spec.Platform.GCP.ResourceTags = append(cluster.Spec.Platform.GCP.ResourceTags, privatev1.GCPResourceTag{Key: fmt.Sprintf("tag%d", i), Value: "v"})
+	}
+	tr := mock.New()
+	_, store := buildReconciler(t, cluster, nil, tr, nil)
+	r := hc.New(tr, testLogger(t), store, nil, []manifest.ResourceTag{{Key: "extra", Value: "v"}}, "", "")
+	_, err := r.Reconcile(t.Context(), reconcile.Request{NamespacedName: client.ObjectKeyFromObject(cluster)})
+	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
+	require.Empty(t, tr.ApplyCalls, "invalid merged tags must not be delivered")
 }

@@ -127,6 +127,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// Merge the persisted per-cluster tags with platform configuration. Platform
+	// tags win on duplicate keys, matching ownership of required platform tags.
+	var requestedTags []privatev1.GCPResourceTag
+	if gcp := cluster.Spec.Platform.GCP; gcp != nil {
+		requestedTags = gcp.ResourceTags
+	}
+	resourceTags, err := mergeResourceTags(requestedTags, r.resourceTags)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("%s: merge resource tags: %w", adapterName, err)
+	}
+
 	// Build manifests.
 	// TODO: CreatedBy is not yet in the orlop ClusterSpec.
 	mwInput := manifest.Input{
@@ -156,7 +167,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		PullSecretStoreName:  r.pullSecretStoreName,
 		PullSecretGCPKey:     r.pullSecretGCPKey,
 		ResourceLabels:       r.customerLabels,
-		ResourceTags:         r.resourceTags,
+		ResourceTags:         resourceTags,
 	}
 
 	manifests, err := manifest.Build(mwInput)
@@ -164,13 +175,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, fmt.Errorf("%s: build manifests: %w", adapterName, err)
 	}
 
-	mwStatus, err := r.transport.Apply(ctx, placement.ManagementClusterName, groupKey, manifests, transport.ApplyOptions{
-		CreateOnlyFields: map[string][][]string{
-			transport.ResourceKey("hypershift.openshift.io", "v1beta1", "hostedclusters", "clusters-"+string(cluster.UID), safeName): {
-				{"spec", "platform", "gcp", "resourceTags"},
-			},
-		},
-	})
+	mwStatus, err := r.transport.Apply(ctx, placement.ManagementClusterName, groupKey, manifests)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("%s: apply resources: %w", adapterName, err)
 	}

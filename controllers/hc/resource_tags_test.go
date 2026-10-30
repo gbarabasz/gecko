@@ -1,6 +1,7 @@
 package hc
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/openshift-online/gecko/controllers/hc/manifest"
+	privatev1 "github.com/openshift-online/gecko/platform-api/api/private/v1"
+
+	"k8s.io/utils/ptr"
 )
 
 func TestLoadResourceTags(t *testing.T) {
@@ -40,4 +44,36 @@ func TestLoadResourceTags(t *testing.T) {
 	}
 	_, err := LoadResourceTags(filepath.Join(t.TempDir(), "missing.json"))
 	require.ErrorContains(t, err, "read resource tags file")
+}
+
+func TestMergeResourceTags(t *testing.T) {
+	requested := []privatev1.GCPResourceTag{
+		{Key: "env", Value: "prod", ParentID: ptr.To("123456789")},
+		{Key: "redhat-managed", Value: "false", ParentID: ptr.To("987654321")},
+	}
+	configured := []manifest.ResourceTag{{Key: "redhat-managed", Value: "true"}, {Key: "app", Value: "platform"}}
+	requestedBefore := make([]privatev1.GCPResourceTag, len(requested))
+	copy(requestedBefore, requested)
+	configuredBefore := append([]manifest.ResourceTag(nil), configured...)
+	tags, err := mergeResourceTags(requested, configured)
+	require.NoError(t, err)
+	require.Equal(t, []manifest.ResourceTag{{Key: "app", Value: "platform"}, {Key: "env", Value: "prod", ParentID: "123456789"}, {Key: "redhat-managed", Value: "true"}}, tags)
+	require.Equal(t, requestedBefore, requested)
+	require.Equal(t, configuredBefore, configured)
+	tags[0].Value = "changed"
+	require.Equal(t, configuredBefore, configured)
+	require.Equal(t, requestedBefore, requested)
+	empty, err := mergeResourceTags(nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, empty)
+	// Each source is valid separately; enforce the limit on the merged union.
+	many := make([]privatev1.GCPResourceTag, 50)
+	for i := range many {
+		many[i] = privatev1.GCPResourceTag{Key: fmt.Sprintf("tag%d", i), Value: "v"}
+	}
+	_, err = mergeResourceTags(many, []manifest.ResourceTag{{Key: "extra", Value: "v"}})
+	require.ErrorContains(t, err, "combined resource tags must contain at most 50")
+	merged, err := mergeResourceTags(many, []manifest.ResourceTag{{Key: "tag0", Value: "override"}})
+	require.NoError(t, err)
+	require.Len(t, merged, 50)
 }

@@ -2,13 +2,9 @@ package mock
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 
 	"github.com/openshift-online/gecko/controllers/client/transport"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // ApplyCall records arguments from an Apply call.
@@ -32,8 +28,7 @@ type CleanupDeleteDesiresCall struct {
 
 // Client is an in-memory implementation of transport.Client for use in tests.
 type Client struct {
-	mu      sync.RWMutex
-	desired map[string]map[string]any
+	mu sync.RWMutex
 
 	// StatusOverrides allows tests to inject a specific status for Apply/GetStatus calls.
 	// Key format: "targetCluster/groupKey".
@@ -75,39 +70,14 @@ func storeKey(targetCluster, groupKey string) string {
 }
 
 // Apply records the call and returns any configured status override.
-func (c *Client) Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte, opts ...transport.ApplyOptions) (*transport.Status, error) {
+func (c *Client) Apply(ctx context.Context, targetCluster, groupKey string, manifests [][]byte) (*transport.Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.desired == nil {
-		c.desired = make(map[string]map[string]any)
-	}
-	effective := make([][]byte, len(manifests))
-	for i, raw := range manifests {
-		var obj map[string]any
-		if err := json.Unmarshal(raw, &obj); err != nil {
-			return nil, err
-		}
-		resource := &unstructured.Unstructured{Object: obj}
-		gvr, _ := meta.UnsafeGuessKindToResource(resource.GroupVersionKind())
-		key := transport.ResourceKey(gvr.Group, gvr.Version, gvr.Resource, resource.GetNamespace(), resource.GetName())
-		identity := storeKey(targetCluster, groupKey) + "/" + key
-		if original, ok := c.desired[identity]; ok {
-			if err := transport.PreserveCreateOnlyFields(obj, original, transport.CreateOnlyPaths(key, opts)); err != nil {
-				return nil, err
-			}
-		}
-		c.desired[identity] = obj
-		encoded, err := json.Marshal(obj)
-		if err != nil {
-			return nil, err
-		}
-		effective[i] = encoded
-	}
 	c.ApplyCalls = append(c.ApplyCalls, ApplyCall{
 		TargetCluster: targetCluster,
 		GroupKey:      groupKey,
-		Manifests:     effective,
+		Manifests:     manifests,
 	})
 
 	key := storeKey(targetCluster, groupKey)
@@ -174,7 +144,6 @@ func (c *Client) Reset() {
 	c.StatusOverrides = make(map[string]*transport.Status)
 	c.DeleteStatusOverrides = make(map[string]*transport.DeleteStatus)
 	c.ApplyCalls = nil
-	c.desired = nil
 	c.DeleteCalls = nil
 	c.CleanupDeleteDesiresCalls = nil
 	c.DeleteErr = nil

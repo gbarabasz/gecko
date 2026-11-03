@@ -3,6 +3,7 @@ package v1_test
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,11 +83,19 @@ func TestPlatformRoleSchemasExposeCompletePermissionSet(t *testing.T) {
 				t.Fatal(err)
 			}
 			spec := schema["properties"].(map[string]any)["spec"].(map[string]any)
+			description, _ := spec["description"].(string)
+			if !strings.HasPrefix(description, "spec ") {
+				t.Fatalf("missing customer-facing spec description: %q", description)
+			}
 			properties := spec["properties"].(map[string]any)
 			if len(properties) != 1 {
 				t.Fatalf("unexpected spec fields: %v", properties)
 			}
 			permissions := properties["permissions"].(map[string]any)
+			description, _ = permissions["description"].(string)
+			if !strings.HasPrefix(description, "permissions ") {
+				t.Fatalf("missing customer-facing permissions description: %q", description)
+			}
 			if permissions["type"] != "array" || permissions["x-kubernetes-list-type"] != "set" {
 				t.Fatalf("invalid permission schema: %v", permissions)
 			}

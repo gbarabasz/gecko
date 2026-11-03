@@ -21,9 +21,11 @@ properties:
   metadata:
     type: object
   spec:
-    description: PlatformRoleSpec describes the permissions granted by a PlatformRole.
+    description: spec describes the permission set included in this platform role.
     properties:
       permissions:
+        description: permissions is the complete set of permissions included in this
+          role.
         items:
           type: string
         minItems: 1

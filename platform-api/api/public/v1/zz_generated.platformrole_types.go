@@ -14,6 +14,7 @@ type PlatformRole struct {
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
+	// spec describes the permission set included in this platform role.
 	// +required
 	Spec PlatformRoleSpec `json:"spec"`
 }
@@ -26,6 +27,7 @@ type PlatformRoleList struct {
 	// +optional
 	metav1.ListMeta `json:"metadata,omitempty"`
 
+	// items contains the platform roles returned by this list.
 	// +optional
 	Items []PlatformRole `json:"items"`
 }
@@ -33,6 +35,7 @@ type PlatformRoleList struct {
 // PlatformRoleSpec describes the permissions granted by a PlatformRole.
 type PlatformRoleSpec struct {
 
+	// permissions is the complete set of permissions included in this role.
 	// +kubebuilder:validation:MinItems=1
 	// +listType=set
 	// +required

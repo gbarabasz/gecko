@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/openshift-online/gecko/orlop/pkg/apiserver/constants"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/conversion"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/handlers"
 	"github.com/openshift-online/gecko/orlop/pkg/apiserver/middleware"
@@ -24,6 +25,18 @@ func notImplementedHandler(verb string) http.HandlerFunc {
 	}
 }
 
+// restrictWatch enforces the declared watch capability independently of
+// authorization. List and watch share a GET route, but are separate API verbs.
+func restrictWatch(next http.HandlerFunc, info types.ResourceInfo) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get(constants.QueryParamWatch) == "true" && !info.VerbAllowed("watch") {
+			notImplementedHandler("watch")(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // registerVerbsForResource registers HTTP handlers for each standard verb on
 // path prefix p (e.g., "/clusters"). Verbs not permitted by info.VerbAllowed
 // are wired to notImplementedHandler so callers receive 501 rather than 404.
@@ -35,7 +48,7 @@ func registerVerbsForResource(r chi.Router, p string, h *handlers.ConvertingReso
 		r.Post("/"+p, notImplementedHandler("create"))
 	}
 	if info.VerbAllowed("list") {
-		r.Get("/"+p, h.List)
+		r.Get("/"+p, restrictWatch(h.List, info))
 	} else {
 		r.Get("/"+p, notImplementedHandler("list"))
 	}
@@ -71,7 +84,7 @@ func registerVerbsForNestedResource(r chi.Router, h *handlers.ConvertingResource
 		r.Post("/", notImplementedHandler("create"))
 	}
 	if info.VerbAllowed("list") {
-		r.Get("/", h.List)
+		r.Get("/", restrictWatch(h.List, info))
 	} else {
 		r.Get("/", notImplementedHandler("list"))
 	}
@@ -203,7 +216,7 @@ func setupConvertingRouter(publicRegistry *ResourceRegistry, privateRegistry *Re
 				handler := handlerInterface.(*handlers.ConvertingResourceHandler)
 				// Cross-namespace list: honor verb restriction
 				if res.VerbAllowed("list") {
-					r.Get("/"+res.Plural, handler.List)
+					r.Get("/"+res.Plural, restrictWatch(handler.List, res))
 				} else {
 					r.Get("/"+res.Plural, notImplementedHandler("list"))
 				}

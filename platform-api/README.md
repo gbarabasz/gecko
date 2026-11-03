@@ -109,3 +109,25 @@ A simple controller that assigns management clusters to ManagedHostedCluster res
 ```sh
 KUBECONFIG=$PWD/kubeconfig.yaml go run ./cmd/mhc-scheduler --health-probe-bind-address=0 --metrics-bind-address=0
 ```
+
+### PlatformRole discovery
+
+Authenticated callers can `GET /apis/gcp.managed.openshift.io/v1/platformroles`
+and `GET /apis/gcp.managed.openshift.io/v1/platformroles/{name}` to discover
+system-managed roles and their complete permission sets. These cluster-scoped
+catalog reads use the same temporary authorization exemption as Version and
+Channel: no project RoleBinding is required, but ESPv2 authentication remains
+mandatory. Public mutation and watch operations are not supported; definitions
+continue to be managed through Helm and the private API.
+
+The existing public metadata filter applies unchanged (private-prefixed metadata
+and finalizers are removed). Non-private metadata, including Argo CD annotations,
+can still be returned; `gcphcpctl platformrole` minimizes metadata in its output.
+
+Before deploying a replacement platform-scope authorizer that removes exemptions,
+the authorization/release owners must add PlatformRole get/list actions and
+all-authenticated grants and coordinate their infrastructure rollout. Preserve
+these paths and the all-authenticated contract during that migration. The
+Version/Channel-only binding POC is not sufficient. ESPv2 must also declare both
+routes before clients can reach them; promote this API revision before applying
+the matching gcp-hcp-infra Endpoints configuration in each environment.

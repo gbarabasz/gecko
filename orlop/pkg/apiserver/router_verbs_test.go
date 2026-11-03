@@ -57,3 +57,28 @@ func TestRegisterVerbsForResource_NoRestriction_AllVerbsAllowed(t *testing.T) {
 		}
 	}
 }
+
+func TestRestrictWatch(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		verbs []string
+		query string
+		want  int
+	}{
+		{name: "read-only watch", verbs: []string{"get", "list"}, query: "?watch=true", want: http.StatusNotImplemented},
+		{name: "read-only list", verbs: []string{"get", "list"}, want: http.StatusOK},
+		{name: "explicit list", verbs: []string{"get", "list"}, query: "?watch=false", want: http.StatusOK},
+		{name: "watch enabled", verbs: []string{"get", "list", "watch"}, query: "?watch=true", want: http.StatusOK},
+		{name: "unrestricted watch", query: "?watch=true", want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			handler := restrictWatch(func(w http.ResponseWriter, _ *http.Request) { called = true; w.WriteHeader(http.StatusOK) }, types.ResourceInfo{Verbs: tc.verbs})
+			response := httptest.NewRecorder()
+			handler(response, httptest.NewRequest(http.MethodGet, "/catalog"+tc.query, nil))
+			if response.Code != tc.want || called != (tc.want == http.StatusOK) {
+				t.Fatalf("status=%d handler called=%t", response.Code, called)
+			}
+		})
+	}
+}

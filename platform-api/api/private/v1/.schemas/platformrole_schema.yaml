@@ -1,6 +1,7 @@
 description: |-
   PlatformRole is a cluster-scoped, system-managed role. PlatformRoles are
-  seeded by Helm and are intentionally not projected to the public API.
+  seeded by Helm. Every authenticated user can discover their names and complete
+  permission sets through the read-only public API.
 properties:
   apiVersion:
     description: |-
